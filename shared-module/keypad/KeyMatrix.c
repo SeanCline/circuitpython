@@ -123,6 +123,28 @@ static size_t keymatrix_get_key_count(void *self_in) {
     return common_hal_keypad_keymatrix_get_column_count(self) * common_hal_keypad_keymatrix_get_row_count(self);
 }
 
+static bool keymatrix_all_columns_settled(void *self_in) {
+    keypad_keymatrix_obj_t *self = self_in;
+    
+    for (size_t column = 0; column < common_hal_keypad_keymatrix_get_column_count(self); column++) {
+
+        // Get the current pressed state by reading whether the column is asserted:
+        //  - Low when columns_to_anodes is true.
+        //  - High when columns_to_anodes is false.
+        const bool current =
+            common_hal_digitalio_digitalinout_get_value(self->column_digitalinouts->items[column]) !=
+            self->columns_to_anodes;
+        
+        // Check if a column indicates it's still pressed even though all rows are pulled inputs.
+        // For this to happen, there must be some stray capacitance (or inductance?) that needs
+        // to discharge before the columns settle to their unpressed state. 
+        if (current)
+          return false;
+    }
+    
+    return true;
+}
+
 static void keymatrix_scan_now(void *self_in, mp_obj_t timestamp) {
     keypad_keymatrix_obj_t *self = self_in;
 
@@ -161,5 +183,11 @@ static void keymatrix_scan_now(void *self_in, mp_obj_t timestamp) {
         // Switch the row back to an input, pulled appropriately
         common_hal_digitalio_digitalinout_switch_to_input(
             row_dio, self->columns_to_anodes ? PULL_UP : PULL_DOWN);
+            
+        // Wait for the columns to settle down to their unpressed state.
+        for (int i = 0; i < 10; ++i) {
+          if (keymatrix_all_columns_settled(self))
+            break;
+        }
     }
 }
