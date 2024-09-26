@@ -3,7 +3,7 @@
  *
  * The MIT License (MIT)
  *
- * SPDX-FileCopyrightText: Copyright (c) 2013, 2014 Damien P. George
+ * Copyright (c) 2013, 2014 Damien P. George
  * Copyright (c) 2015 Daniel Campora
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -27,13 +27,13 @@
 #ifndef MICROPY_INCLUDED_LIB_NETUTILS_NETUTILS_H
 #define MICROPY_INCLUDED_LIB_NETUTILS_NETUTILS_H
 
+#include "py/obj.h"
+
 #define NETUTILS_IPV4ADDR_BUFSIZE    4
 
 #define NETUTILS_TRACE_IS_TX        (0x0001)
 #define NETUTILS_TRACE_PAYLOAD      (0x0002)
 #define NETUTILS_TRACE_NEWLINE      (0x0004)
-
-#include "py/runtime.h"
 
 typedef enum _netutils_endian_t {
     NETUTILS_LITTLE,

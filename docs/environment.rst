@@ -56,15 +56,27 @@ CircuitPython behavior
 CircuitPython will also read the environment to configure its behavior. Other
 keys are ignored by CircuitPython. Here are the keys it uses:
 
+Core CircuitPython keys
+^^^^^^^^^^^^^^^^^^^^^^^
+
 CIRCUITPY_BLE_NAME
 ~~~~~~~~~~~~~~~~~~
 Default BLE name the board advertises as, including for the BLE workflow.
 
-CIRCUITPY_RESERVED_PSRAM
-~~~~~~~~~~~~~~~~~~~~~~~~
-On boards with Espressif microcontrollers with PSRAM (also called SPIRAM), permanently reserve a portion of PSRAM for use by esp-idf.
-This storage is removed from the CircuitPython "heap" and is available for allocation by esp-idf routines in the core instead.
-Generally, only set this to a non-zero value when it is required by a specific core module.
+CIRCUITPY_HEAP_START_SIZE
+~~~~~~~~~~~~~~~~~~~~~~~~~
+Sets the initial size of the python heap, allocated from the outer heap. Must be a multiple of 4.
+The default is currently 8192.
+The python heap will grow by doubling and redoubling this initial size until it cannot fit in the outer heap.
+Larger values will reserve more RAM for python use and prevent the supervisor and SDK
+from large allocations of their own.
+Smaller values will likely grow sooner than large start sizes.
+
+CIRCUITPY_PYSTACK_SIZE
+~~~~~~~~~~~~~~~~~~~~~~
+Sets the size of the python stack. Must be a multiple of 4. The default value is currently 1536.
+Increasing the stack reduces the size of the heap available to python code.
+Used to avoid "Pystack exhausted" errors when the code can't be reworked to avoid it.
 
 CIRCUITPY_WEB_API_PASSWORD
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -74,6 +86,10 @@ CIRCUITPY_WEB_API_PORT
 ~~~~~~~~~~~~~~~~~~~~~~
 TCP port number used for the web HTTP API. Defaults to 80 when omitted.
 
+CIRCUITPY_WEB_INSTANCE_NAME
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Name the board advertises as for the WEB workflow. Defaults to human readable board name if omitted.
+
 CIRCUITPY_WIFI_PASSWORD
 ~~~~~~~~~~~~~~~~~~~~~~~
 Wi-Fi password used to auto connect to CIRCUITPY_WIFI_SSID.
@@ -81,3 +97,25 @@ Wi-Fi password used to auto connect to CIRCUITPY_WIFI_SSID.
 CIRCUITPY_WIFI_SSID
 ~~~~~~~~~~~~~~~~~~~
 Wi-Fi SSID to auto-connect to even if user code is not running.
+
+Additional board specific keys
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+`MaTouch ESP32-S3 Parallel TFT with Touch 7“ <https://circuitpython.org/board/makerfabs_tft7/>`_
+
+CIRCUITPY_DISPLAY_WIDTH
+~~~~~~~~~~~~~~~~~~~~~~~
+Selects the correct screen resolution (1024x600 or 800x640) for the particular board variant.
+If the CIRCUITPY_DISPLAY_WIDTH parameter is set to a value of 1024 the display is initialized
+during power up at 1024x600 otherwise the display will be initialized at a resolution
+of 800x480.
+
+`Sunton ESP32-2432S028 <https://circuitpython.org/board/sunton_esp32_2432S028/>`_
+
+CIRCUITPY_DISPLAY_ROTATION
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+Selects the correct screen rotation (0, 90, 180 or 270) for the particular board variant.
+If the CIRCUITPY_DISPLAY_ROTATION parameter is set the display will be initialized
+during power up with the selected rotation, otherwise the display will be initialized with
+a rotation of 0. Attempting to initialize the screen with a rotation other than 0,
+90, 180 or 270 is not supported and will result in an unexpected screen rotation.

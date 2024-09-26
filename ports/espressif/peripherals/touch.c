@@ -1,29 +1,10 @@
-/*
- * This file is part of the MicroPython project, http://micropython.org/
- *
- * The MIT License (MIT)
- *
- * Copyright (c) 2020 microDev
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// This file is part of the CircuitPython project: https://circuitpython.org
+//
+// SPDX-FileCopyrightText: Copyright (c) 2020 microDev
+//
+// SPDX-License-Identifier: MIT
 
+#include "py/gc.h"
 #include "peripherals/touch.h"
 
 static bool touch_inited = false;
@@ -43,7 +24,7 @@ void peripherals_touch_never_reset(const bool enable) {
 void peripherals_touch_init(const touch_pad_t touchpad) {
     if (!touch_inited) {
         touch_pad_init();
-        touch_pad_set_fsm_mode(TOUCH_FSM_MODE_SW);
+        touch_pad_set_fsm_mode(TOUCH_FSM_MODE_TIMER);
     }
     // touch_pad_config() must be done before touch_pad_fsm_start() the first time.
     // Otherwise the calibration is wrong and we get maximum raw values if there is
@@ -61,14 +42,12 @@ uint16_t peripherals_touch_read(touch_pad_t touchpad) {
     #if defined(CONFIG_IDF_TARGET_ESP32)
     uint16_t touch_value;
     touch_pad_read(touchpad, &touch_value);
+
     // ESP32 touch_pad_read() returns a lower value when a pin is touched instead of a higher value.
     // Flip the values around to be consistent with TouchIn assumptions.
     return UINT16_MAX - touch_value;
     #else
     uint32_t touch_value;
-    touch_pad_sw_start();
-    while (!touch_pad_meas_is_done()) {
-    }
     touch_pad_read_raw_data(touchpad, &touch_value);
     if (touch_value > UINT16_MAX) {
         return UINT16_MAX;

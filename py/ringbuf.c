@@ -1,29 +1,13 @@
-/*
- * This file is part of the MicroPython project, http://micropython.org/
- *
- * The MIT License (MIT)
- *
- * Copyright (c) 2016 Paul Sokolovsky
- * Copyright (c) 2019 Jim Mussared
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// This file is part of the CircuitPython project: https://circuitpython.org
+//
+// SPDX-FileCopyrightText: Copyright (c) 2016 Paul Sokolovsky
+// SPDX-FileCopyrightText: Copyright (c) 2019 Jim Mussared
+// SPDX-FileCopyrightText: Copyright (c) 2020 Dan Halbert for Adafruit Industries LLC
+//
+// SPDX-License-Identifier: MIT
+
+// CIRCUITPY-CHANGE: API and implementation thoroughly reworked
+// No attempt to have atomic operations. Add guards if atomicity required.
 
 #include "ringbuf.h"
 
@@ -37,8 +21,8 @@ bool ringbuf_init(ringbuf_t *r, uint8_t *buf, size_t size) {
 }
 
 // Dynamic initialization. This should be accessible from a root pointer..
-bool ringbuf_alloc(ringbuf_t *r, size_t size, bool long_lived) {
-    bool result = ringbuf_init(r, gc_alloc(size, false, long_lived), size);
+bool ringbuf_alloc(ringbuf_t *r, size_t size) {
+    bool result = ringbuf_init(r, m_malloc(size), size);
     return result;
 }
 
@@ -72,7 +56,6 @@ int ringbuf_get16(ringbuf_t *r) {
     if (r->used < 2) {
         return -1;
     }
-
     int high_byte = ringbuf_get(r);
     int low_byte = ringbuf_get(r);
     return (high_byte << 8) | low_byte;
@@ -89,6 +72,15 @@ int ringbuf_put(ringbuf_t *r, uint8_t v) {
         r->next_write = 0;
     }
     r->used++;
+    return 0;
+}
+
+int ringbuf_put16(ringbuf_t *r, uint16_t v) {
+    if (r->size - r->used < 2) {
+        return -1;
+    }
+    ringbuf_put(r, (v >> 8) & 0xff);
+    ringbuf_put(r, v & 0xff);
     return 0;
 }
 
@@ -131,14 +123,4 @@ size_t ringbuf_get_n(ringbuf_t *r, uint8_t *buf, size_t bufsize) {
         buf[i] = b;
     }
     return bufsize;
-}
-
-int ringbuf_put16(ringbuf_t *r, uint16_t v) {
-    if (r->size - r->used < 2) {
-        return -1;
-    }
-
-    ringbuf_put(r, (v >> 8) & 0xff);
-    ringbuf_put(r, v & 0xff);
-    return 0;
 }

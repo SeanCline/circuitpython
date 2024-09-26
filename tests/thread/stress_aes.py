@@ -11,9 +11,7 @@
 # aggressive by changing the amount of data to encrypt, the number of loops and
 # the number of threads.
 #
-# SPDX-FileCopyrightText: Copyright (c) 2016 Damien P. George on behalf of Pycom Ltd
-#
-# SPDX-License-Identifier: MIT
+# MIT license; Copyright (c) 2016 Damien P. George on behalf of Pycom Ltd
 
 ##################################################################
 # discrete arithmetic routines, mostly from a precomputed table
@@ -218,10 +216,7 @@ class AES:
 ##################################################################
 # test code
 
-try:
-    import utime as time
-except ImportError:
-    import time
+import time
 import _thread
 
 
@@ -271,7 +266,11 @@ def thread_entry(n_loop):
 if __name__ == "__main__":
     import sys
 
-    if sys.platform == "rp2":
+    if hasattr(sys, "settrace"):
+        # Builds with sys.settrace enabled are slow, so make the test short.
+        n_thread = 2
+        n_loop = 2
+    elif sys.platform == "rp2":
         n_thread = 1
         n_loop = 2
     elif sys.platform in ("esp32", "pyboard"):

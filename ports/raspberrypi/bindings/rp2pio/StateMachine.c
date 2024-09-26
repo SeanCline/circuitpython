@@ -1,28 +1,8 @@
-/*
- * This file is part of the MicroPython project, http://micropython.org/
- *
- * The MIT License (MIT)
- *
- * Copyright (c) 2021 Scott Shawcroft for Adafruit Industries
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// This file is part of the CircuitPython project: https://circuitpython.org
+//
+// SPDX-FileCopyrightText: Copyright (c) 2021 Scott Shawcroft for Adafruit Industries
+//
+// SPDX-License-Identifier: MIT
 
 // This file contains all of the Python API definitions for the
 // rp2pio.StateMachine class.
@@ -40,9 +20,14 @@
 #include "py/mperrno.h"
 #include "py/objproperty.h"
 #include "py/runtime.h"
-#include "supervisor/shared/translate/translate.h"
 
-
+//| import memorymap
+//|
+//| FifoType = Literal["auto", "txrx", "tx", "rx", "txput", "txget", "putget"]
+//| FifoType_piov0 = Literal["auto", "txrx", "tx", "rx"]
+//| MovStatusType = Literal["txfifo", "rxfifo", "irq"]
+//| MovStatusType_piov0 = Literal["txfifo"]
+//|
 //| class StateMachine:
 //|     """A single PIO StateMachine
 //|
@@ -62,6 +47,8 @@
 //|         program: ReadableBuffer,
 //|         frequency: int,
 //|         *,
+//|         pio_version: int = 0,
+//|         may_exec: Optional[ReadableBuffer] = None,
 //|         init: Optional[ReadableBuffer] = None,
 //|         first_out_pin: Optional[microcontroller.Pin] = None,
 //|         out_pin_count: int = 1,
@@ -93,66 +80,95 @@
 //|         user_interruptible: bool = True,
 //|         wrap_target: int = 0,
 //|         wrap: int = -1,
+//|         offset: int = -1,
+//|         fifo_type: FifoType = "auto",
+//|         mov_status_type: MovStatusType = "txfifo",
+//|         mov_status_n: int = 0,
 //|     ) -> None:
 //|         """Construct a StateMachine object on the given pins with the given program.
+//|
+//|         The following parameters are usually supplied directly:
 //|
 //|         :param ReadableBuffer program: the program to run with the state machine
 //|         :param int frequency: the target clock frequency of the state machine. Actual may be less. Use 0 for system clock speed.
 //|         :param ReadableBuffer init: a program to run once at start up. This is run after program
 //|              is started so instructions may be intermingled
+//|         :param ReadableBuffer may_exec: Instructions that may be executed via `StateMachine.run` calls.
+//|             Some elements of the `StateMachine`'s configuration are inferred from the instructions used;
+//|             for instance, if there is no ``in`` or ``push`` instruction, then the `StateMachine` is configured without a receive FIFO.
+//|             In this case, passing a ``may_exec`` program containing an ``in`` instruction such as ``in x``, a receive FIFO will be configured.
 //|         :param ~microcontroller.Pin first_out_pin: the first pin to use with the OUT instruction
-//|         :param int out_pin_count: the count of consecutive pins to use with OUT starting at first_out_pin
 //|         :param int initial_out_pin_state: the initial output value for out pins starting at first_out_pin
 //|         :param int initial_out_pin_direction: the initial output direction for out pins starting at first_out_pin
 //|         :param ~microcontroller.Pin first_in_pin: the first pin to use with the IN instruction
-//|         :param int in_pin_count: the count of consecutive pins to use with IN starting at first_in_pin
 //|         :param int pull_in_pin_up: a 1-bit in this mask sets pull up on the corresponding in pin
 //|         :param int pull_in_pin_down: a 1-bit in this mask sets pull down on the corresponding in pin. Setting both pulls enables a "bus keep" function, i.e. a weak pull to whatever is current high/low state of GPIO.
 //|         :param ~microcontroller.Pin first_set_pin: the first pin to use with the SET instruction
-//|         :param int set_pin_count: the count of consecutive pins to use with SET starting at first_set_pin
 //|         :param int initial_set_pin_state: the initial output value for set pins starting at first_set_pin
 //|         :param int initial_set_pin_direction: the initial output direction for set pins starting at first_set_pin
 //|         :param ~microcontroller.Pin first_sideset_pin: the first pin to use with a side set
-//|         :param int sideset_pin_count: the count of consecutive pins to use with a side set starting at first_sideset_pin. Does not include sideset enable
 //|         :param int initial_sideset_pin_state: the initial output value for sideset pins starting at first_sideset_pin
 //|         :param int initial_sideset_pin_direction: the initial output direction for sideset pins starting at first_sideset_pin
 //|         :param bool sideset_enable: True when the top sideset bit is to enable. This should be used with the ".side_set # opt" directive
 //|         :param ~microcontroller.Pin jmp_pin: the pin which determines the branch taken by JMP PIN instructions
 //|         :param ~digitalio.Pull jmp_pin_pull: The pull value for the jmp pin, default is no pull.
 //|         :param bool exclusive_pin_use: When True, do not share any pins with other state machines. Pins are never shared with other peripherals
-//|         :param bool auto_pull: When True, automatically load data from the tx FIFO into the
-//|             output shift register (OSR) when an OUT instruction shifts more than pull_threshold bits
-//|         :param int pull_threshold: Number of bits to shift before loading a new value into the OSR from the tx FIFO
-//|         :param bool out_shift_right: When True, data is shifted out the right side (LSB) of the
-//|             OSR. It is shifted out the left (MSB) otherwise. NOTE! This impacts data alignment
-//|             when the number of bytes is not a power of two (1, 2 or 4 bytes).
 //|         :param bool wait_for_txstall: When True, writing data out will block until the TX FIFO and OSR are empty
 //|             and an instruction is stalled waiting for more data. When False, data writes won't
 //|             wait for the OSR to empty (only the TX FIFO) so make sure you give enough time before
 //|             deiniting or stopping the state machine.
-//|         :param bool auto_push: When True, automatically save data from input shift register
-//|              (ISR) into the rx FIFO when an IN instruction shifts more than push_threshold bits
-//|         :param int push_threshold: Number of bits to shift before saving the ISR value to the RX FIFO
-//|         :param bool in_shift_right: When True, data is shifted into the right side (LSB) of the
-//|             ISR. It is shifted into the left (MSB) otherwise. NOTE! This impacts data alignment
-//|             when the number of bytes is not a power of two (1, 2 or 4 bytes).
 //|         :param bool user_interruptible: When True (the default),
 //|             `write()`, `readinto()`, and `write_readinto()` can be interrupted by a ctrl-C.
 //|             This is useful when developing a PIO program: if there is an error in the program
 //|             that causes an infinite loop, you will be able to interrupt the loop.
 //|             However, if you are writing to a device that can get into a bad state if a read or write
 //|             is interrupted, you may want to set this to False after your program has been vetted.
+//|         :param int offset: A specific offset in the state machine's program memory where the program must be loaded.
+//|             The default value, -1, allows the program to be loaded at any offset.
+//|             This is appropriate for most programs.
+//|
+//|         The following parameters are usually set via assembler directives and passed using a ``**program.pio_kwargs`` argument but may also be specified directly:
+//|
+//|         :param int out_pin_count: the count of consecutive pins to use with OUT starting at first_out_pin
+//|         :param int in_pin_count: the count of consecutive pins to use with IN starting at first_in_pin
+//|         :param int set_pin_count: the count of consecutive pins to use with SET starting at first_set_pin
+//|         :param int sideset_pin_count: the count of consecutive pins to use with a side set starting at first_sideset_pin. Does not include sideset enable
+//|         :param int pio_version: The version of the PIO peripheral required by the program. The constructor will raise an error if the actual hardware is not compatible with this program version.
+//|         :param bool auto_push: When True, automatically save data from input shift register
+//|              (ISR) into the rx FIFO when an IN instruction shifts more than push_threshold bits
+//|         :param int push_threshold: Number of bits to shift before saving the ISR value to the RX FIFO
+//|         :param bool in_shift_right: When True, data is shifted into the right side (LSB) of the
+//|             ISR. It is shifted into the left (MSB) otherwise. NOTE! This impacts data alignment
+//|             when the number of bytes is not a power of two (1, 2 or 4 bytes).
+//|         :param bool auto_pull: When True, automatically load data from the tx FIFO into the
+//|             output shift register (OSR) when an OUT instruction shifts more than pull_threshold bits
+//|         :param int pull_threshold: Number of bits to shift before loading a new value into the OSR from the tx FIFO
+//|         :param bool out_shift_right: When True, data is shifted out the right side (LSB) of the
+//|             OSR. It is shifted out the left (MSB) otherwise. NOTE! This impacts data alignment
+//|             when the number of bytes is not a power of two (1, 2 or 4 bytes).
 //|         :param int wrap_target: The target instruction number of automatic wrap. Defaults to the first instruction of the program.
 //|         :param int wrap: The instruction after which to wrap to the ``wrap``
 //|             instruction. As a special case, -1 (the default) indicates the
 //|             last instruction of the program.
+//|         :param FifoType fifo_type: How the program accessess the FIFOs. PIO version 0 only supports a subset of values.
+//|         :param MovStatusType mov_status_type: What condition the ``mov status`` instruction checks. PIO version 0 only supports a subset of values.
+//|         :param MovStatusType mov_status_n: The FIFO depth or IRQ the ``mov status`` instruction checks for. For ``mov_status irq`` this includes the encoding of the ``next``/``prev`` selection bits.
 //|         """
 //|         ...
 
-STATIC mp_obj_t rp2pio_statemachine_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
-    rp2pio_statemachine_obj_t *self = m_new_obj(rp2pio_statemachine_obj_t);
-    self->base.type = &rp2pio_statemachine_type;
-    enum { ARG_program, ARG_frequency, ARG_init,
+static int one_of(qstr_short_t what, mp_obj_t arg, size_t n_options, const qstr_short_t options[], const int values[]) {
+    for (size_t i = 0; i < n_options; i++) {
+        mp_obj_t option_str = MP_OBJ_NEW_QSTR(options[i]);
+        if (mp_obj_equal(arg, option_str)) {
+            return values[i];
+        }
+    }
+    mp_raise_ValueError_varg(MP_ERROR_TEXT("Invalid %q"), what);
+}
+
+static mp_obj_t rp2pio_statemachine_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
+    rp2pio_statemachine_obj_t *self = mp_obj_malloc(rp2pio_statemachine_obj_t, &rp2pio_statemachine_type);
+    enum { ARG_program, ARG_frequency, ARG_init, ARG_pio_version, ARG_may_exec,
            ARG_first_out_pin, ARG_out_pin_count, ARG_initial_out_pin_state, ARG_initial_out_pin_direction,
            ARG_first_in_pin, ARG_in_pin_count,
            ARG_pull_in_pin_up, ARG_pull_in_pin_down,
@@ -166,11 +182,17 @@ STATIC mp_obj_t rp2pio_statemachine_make_new(const mp_obj_type_t *type, size_t n
            ARG_auto_push, ARG_push_threshold, ARG_in_shift_right,
            ARG_user_interruptible,
            ARG_wrap_target,
-           ARG_wrap,};
+           ARG_wrap,
+           ARG_offset,
+           ARG_fifo_type,
+           ARG_mov_status_type,
+           ARG_mov_status_n, };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_program, MP_ARG_REQUIRED | MP_ARG_OBJ },
         { MP_QSTR_frequency, MP_ARG_REQUIRED | MP_ARG_INT },
         { MP_QSTR_init, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        { MP_QSTR_pio_version, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
+        { MP_QSTR_may_exec, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
 
         { MP_QSTR_first_out_pin, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_out_pin_count, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 1} },
@@ -209,9 +231,17 @@ STATIC mp_obj_t rp2pio_statemachine_make_new(const mp_obj_type_t *type, size_t n
 
         { MP_QSTR_wrap_target, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
         { MP_QSTR_wrap, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
+
+        { MP_QSTR_offset, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = PIO_ANY_OFFSET} },
+
+        { MP_QSTR_fifo_type, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = MP_ROM_QSTR(MP_QSTR_auto) } },
+        { MP_QSTR_mov_status_type, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = MP_ROM_QSTR(MP_QSTR_txfifo) } },
+        { MP_QSTR_mov_status_n, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
     mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+    (void)mp_arg_validate_int_max(args[ARG_pio_version].u_int, PICO_PIO_VERSION, MP_QSTR_out_pin_count);
 
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(args[ARG_program].u_obj, &bufinfo, MP_BUFFER_READ);
@@ -219,6 +249,10 @@ STATIC mp_obj_t rp2pio_statemachine_make_new(const mp_obj_type_t *type, size_t n
     mp_buffer_info_t init_bufinfo;
     init_bufinfo.len = 0;
     mp_get_buffer(args[ARG_init].u_obj, &init_bufinfo, MP_BUFFER_READ);
+
+    mp_buffer_info_t may_exec_bufinfo;
+    may_exec_bufinfo.len = 0;
+    mp_get_buffer(args[ARG_may_exec].u_obj, &may_exec_bufinfo, MP_BUFFER_READ);
 
     // We don't validate pin in use here because we may be ok sharing them within a PIO.
     const mcu_pin_obj_t *first_out_pin =
@@ -249,21 +283,49 @@ STATIC mp_obj_t rp2pio_statemachine_make_new(const mp_obj_type_t *type, size_t n
 
     mp_arg_validate_length_range(bufinfo.len, 2, 64, MP_QSTR_program);
     if (bufinfo.len % 2 != 0) {
-        mp_raise_ValueError(translate("Program size invalid"));
+        mp_raise_ValueError(MP_ERROR_TEXT("Program size invalid"));
     }
 
     mp_arg_validate_length_range(init_bufinfo.len, 0, 64, MP_QSTR_init);
     if (init_bufinfo.len % 2 != 0) {
-        mp_raise_ValueError(translate("Init program size invalid"));
+        mp_raise_ValueError(MP_ERROR_TEXT("Init program size invalid"));
     }
 
     int wrap = args[ARG_wrap].u_int;
     int wrap_target = args[ARG_wrap_target].u_int;
 
+    const qstr_short_t fifo_alternatives[] = { MP_QSTR_auto, MP_QSTR_txrx, MP_QSTR_tx, MP_QSTR_rx,
+                                               #if PICO_PIO_VERSION > 0
+                                               MP_QSTR_txput, MP_QSTR_txget, MP_QSTR_putget
+                                               #endif
+    };
+    const int fifo_values[] = { PIO_FIFO_JOIN_AUTO, PIO_FIFO_JOIN_NONE, PIO_FIFO_JOIN_TX, PIO_FIFO_JOIN_RX,
+                                #if PICO_PIO_VERSION > 0
+                                PIO_FIFO_JOIN_TXPUT, PIO_FIFO_JOIN_TXGET, PIO_FIFO_JOIN_PUTGET
+                                #endif
+    };
+    MP_STATIC_ASSERT(MP_ARRAY_SIZE(fifo_alternatives) == MP_ARRAY_SIZE(fifo_values));
+
+    int fifo_type = one_of(MP_QSTR_fifo_type, args[ARG_fifo_type].u_obj, MP_ARRAY_SIZE(fifo_alternatives), fifo_alternatives, fifo_values);
+
+    const qstr_short_t mov_status_alternatives[] = { MP_QSTR_txfifo, MP_QSTR_rxfifo,
+                                                     #if PICO_PIO_VERSION > 0
+                                                     MP_QSTR_IRQ
+                                                     #endif
+    };
+    const int mov_status_values[] = { STATUS_TX_LESSTHAN, STATUS_RX_LESSTHAN,
+                                      #if PICO_PIO_VERSION > 0
+                                      STATUS_IRQ_SET
+                                      #endif
+    };
+    MP_STATIC_ASSERT(MP_ARRAY_SIZE(mov_status_alternatives) == MP_ARRAY_SIZE(mov_status_values));
+    int mov_status_type = one_of(MP_QSTR_mov_status_type, args[ARG_mov_status_type].u_obj, MP_ARRAY_SIZE(mov_status_alternatives), mov_status_alternatives, mov_status_values);
+
     common_hal_rp2pio_statemachine_construct(self,
         bufinfo.buf, bufinfo.len / 2,
         args[ARG_frequency].u_int,
         init_bufinfo.buf, init_bufinfo.len / 2,
+        may_exec_bufinfo.buf, may_exec_bufinfo.len / 2,
         first_out_pin, out_pin_count, args[ARG_initial_out_pin_state].u_int, args[ARG_initial_out_pin_direction].u_int,
         first_in_pin, in_pin_count, args[ARG_pull_in_pin_up].u_int, args[ARG_pull_in_pin_down].u_int,
         first_set_pin, set_pin_count, args[ARG_initial_set_pin_state].u_int, args[ARG_initial_set_pin_direction].u_int,
@@ -276,14 +338,17 @@ STATIC mp_obj_t rp2pio_statemachine_make_new(const mp_obj_type_t *type, size_t n
         args[ARG_wait_for_txstall].u_bool,
         args[ARG_auto_push].u_bool, push_threshold, args[ARG_in_shift_right].u_bool,
         args[ARG_user_interruptible].u_bool,
-        wrap_target, wrap);
+        wrap_target, wrap, args[ARG_offset].u_int,
+        fifo_type,
+        mov_status_type, args[ARG_mov_status_n].u_int
+        );
     return MP_OBJ_FROM_PTR(self);
 }
 
 //|     def deinit(self) -> None:
 //|         """Turn off the state machine and release its resources."""
 //|         ...
-STATIC mp_obj_t rp2pio_statemachine_obj_deinit(mp_obj_t self_in) {
+static mp_obj_t rp2pio_statemachine_obj_deinit(mp_obj_t self_in) {
     rp2pio_statemachine_obj_t *self = MP_OBJ_TO_PTR(self_in);
     common_hal_rp2pio_statemachine_deinit(self);
     return mp_const_none;
@@ -299,15 +364,15 @@ MP_DEFINE_CONST_FUN_OBJ_1(rp2pio_statemachine_deinit_obj, rp2pio_statemachine_ob
 //|         """Automatically deinitializes the hardware when exiting a context. See
 //|         :ref:`lifetime-and-contextmanagers` for more info."""
 //|         ...
-STATIC mp_obj_t rp2pio_statemachine_obj___exit__(size_t n_args, const mp_obj_t *args) {
+static mp_obj_t rp2pio_statemachine_obj___exit__(size_t n_args, const mp_obj_t *args) {
     (void)n_args;
     common_hal_rp2pio_statemachine_deinit(args[0]);
     return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(rp2pio_statemachine_obj___exit___obj, 4, 4, rp2pio_statemachine_obj___exit__);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(rp2pio_statemachine_obj___exit___obj, 4, 4, rp2pio_statemachine_obj___exit__);
 
 
-STATIC void check_for_deinit(rp2pio_statemachine_obj_t *self) {
+static void check_for_deinit(rp2pio_statemachine_obj_t *self) {
     if (common_hal_rp2pio_statemachine_deinited(self)) {
         raise_deinited_error();
     }
@@ -317,7 +382,7 @@ STATIC void check_for_deinit(rp2pio_statemachine_obj_t *self) {
 //|         """Resets this state machine, runs any init and enables the clock."""
 //|         ...
 // TODO: "and any others given. They must share an underlying PIO. An exception will be raised otherwise.""
-STATIC mp_obj_t rp2pio_statemachine_restart(mp_obj_t self_obj) {
+static mp_obj_t rp2pio_statemachine_restart(mp_obj_t self_obj) {
     rp2pio_statemachine_obj_t *self = MP_OBJ_TO_PTR(self_obj);
     check_for_deinit(self);
 
@@ -334,14 +399,17 @@ MP_DEFINE_CONST_FUN_OBJ_1(rp2pio_statemachine_restart_obj, rp2pio_statemachine_r
 //|         This can be used to output internal state to the RX FIFO and then
 //|         read with `readinto`."""
 //|         ...
-STATIC mp_obj_t rp2pio_statemachine_run(mp_obj_t self_obj, mp_obj_t instruction_obj) {
+static mp_obj_t rp2pio_statemachine_run(mp_obj_t self_obj, mp_obj_t instruction_obj) {
     rp2pio_statemachine_obj_t *self = MP_OBJ_TO_PTR(self_obj);
     check_for_deinit(self);
 
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(instruction_obj, &bufinfo, MP_BUFFER_READ);
 
-    common_hal_rp2pio_statemachine_run(self, bufinfo.buf, bufinfo.len);
+    if (bufinfo.len % 2 != 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("Program size invalid"));
+    }
+    common_hal_rp2pio_statemachine_run(self, bufinfo.buf, (size_t)bufinfo.len / 2);
     return mp_const_none;
 }
 MP_DEFINE_CONST_FUN_OBJ_2(rp2pio_statemachine_run_obj, rp2pio_statemachine_run);
@@ -349,7 +417,7 @@ MP_DEFINE_CONST_FUN_OBJ_2(rp2pio_statemachine_run_obj, rp2pio_statemachine_run);
 //|     def stop(self) -> None:
 //|         """Stops the state machine clock. Use `restart` to enable it."""
 //|         ...
-STATIC mp_obj_t rp2pio_statemachine_stop(mp_obj_t self_obj) {
+static mp_obj_t rp2pio_statemachine_stop(mp_obj_t self_obj) {
     rp2pio_statemachine_obj_t *self = MP_OBJ_TO_PTR(self_obj);
     check_for_deinit(self);
 
@@ -380,7 +448,7 @@ MP_DEFINE_CONST_FUN_OBJ_1(rp2pio_statemachine_stop_obj, rp2pio_statemachine_stop
 //|         :param int end: End of the slice; this index is not included. Defaults to ``len(buffer)``
 //|         :param bool swap: For 2- and 4-byte elements, swap (reverse) the byte order"""
 //|         ...
-STATIC mp_obj_t rp2pio_statemachine_write(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+static mp_obj_t rp2pio_statemachine_write(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     enum { ARG_buffer, ARG_start, ARG_end, ARG_swap };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_buffer,     MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
@@ -397,7 +465,7 @@ STATIC mp_obj_t rp2pio_statemachine_write(size_t n_args, const mp_obj_t *pos_arg
     mp_get_buffer_raise(args[ARG_buffer].u_obj, &bufinfo, MP_BUFFER_READ);
     int stride_in_bytes = mp_binary_get_size('@', bufinfo.typecode, NULL);
     if (stride_in_bytes > 4) {
-        mp_raise_ValueError(translate("Buffer elements must be 4 bytes long or less"));
+        mp_raise_ValueError(MP_ERROR_TEXT("Buffer elements must be 4 bytes long or less"));
     }
     int32_t start = args[ARG_start].u_int;
     size_t length = bufinfo.len / stride_in_bytes;
@@ -467,16 +535,16 @@ MP_DEFINE_CONST_FUN_OBJ_KW(rp2pio_statemachine_write_obj, 2, rp2pio_statemachine
 //|         """
 //|         ...
 
-STATIC void fill_buf_info(sm_buf_info *info, mp_obj_t obj, size_t *stride_in_bytes) {
+static void fill_buf_info(sm_buf_info *info, mp_obj_t obj, size_t *stride_in_bytes) {
     if (obj != mp_const_none) {
         info->obj = obj;
         mp_get_buffer_raise(obj, &info->info, MP_BUFFER_READ);
         size_t stride = mp_binary_get_size('@', info->info.typecode, NULL);
         if (stride > 4) {
-            mp_raise_ValueError(translate("Buffer elements must be 4 bytes long or less"));
+            mp_raise_ValueError(MP_ERROR_TEXT("Buffer elements must be 4 bytes long or less"));
         }
         if (*stride_in_bytes && stride != *stride_in_bytes) {
-            mp_raise_ValueError(translate("Mismatched data size"));
+            mp_raise_ValueError(MP_ERROR_TEXT("Mismatched data size"));
         }
         *stride_in_bytes = stride;
     } else {
@@ -484,7 +552,7 @@ STATIC void fill_buf_info(sm_buf_info *info, mp_obj_t obj, size_t *stride_in_byt
     }
 }
 
-STATIC mp_obj_t rp2pio_statemachine_background_write(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+static mp_obj_t rp2pio_statemachine_background_write(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     enum { ARG_once, ARG_loop, ARG_swap };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_once,     MP_ARG_OBJ, {.u_obj = mp_const_none} },
@@ -521,7 +589,7 @@ MP_DEFINE_CONST_FUN_OBJ_KW(rp2pio_statemachine_background_write_obj, 1, rp2pio_s
 //|         """Immediately stop a background write, if one is in progress.  Any
 //|         DMA in progress is halted, but items already in the TX FIFO are not
 //|         affected."""
-STATIC mp_obj_t rp2pio_statemachine_obj_stop_background_write(mp_obj_t self_in) {
+static mp_obj_t rp2pio_statemachine_obj_stop_background_write(mp_obj_t self_in) {
     rp2pio_statemachine_obj_t *self = MP_OBJ_TO_PTR(self_in);
     bool ok = common_hal_rp2pio_statemachine_stop_background_write(self);
     if (mp_hal_is_interrupted()) {
@@ -536,7 +604,7 @@ MP_DEFINE_CONST_FUN_OBJ_1(rp2pio_statemachine_stop_background_write_obj, rp2pio_
 
 //|     writing: bool
 //|     """Returns True if a background write is in progress"""
-STATIC mp_obj_t rp2pio_statemachine_obj_get_writing(mp_obj_t self_in) {
+static mp_obj_t rp2pio_statemachine_obj_get_writing(mp_obj_t self_in) {
     rp2pio_statemachine_obj_t *self = MP_OBJ_TO_PTR(self_in);
     return mp_obj_new_bool(common_hal_rp2pio_statemachine_get_writing(self));
 }
@@ -554,7 +622,7 @@ const mp_obj_property_t rp2pio_statemachine_writing_obj = {
 //|     """Returns the number of pending buffers for background writing.
 //|
 //|     If the number is 0, then a `StateMachine.background_write` call will not block."""
-STATIC mp_obj_t rp2pio_statemachine_obj_get_pending(mp_obj_t self_in) {
+static mp_obj_t rp2pio_statemachine_obj_get_pending(mp_obj_t self_in) {
     rp2pio_statemachine_obj_t *self = MP_OBJ_TO_PTR(self_in);
     return mp_obj_new_int(common_hal_rp2pio_statemachine_get_pending(self));
 }
@@ -592,7 +660,7 @@ const mp_obj_property_t rp2pio_statemachine_pending_obj = {
 //|         :param bool swap: For 2- and 4-byte elements, swap (reverse) the byte order"""
 //|         ...
 
-STATIC mp_obj_t rp2pio_statemachine_readinto(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+static mp_obj_t rp2pio_statemachine_readinto(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     enum { ARG_buffer, ARG_start, ARG_end, ARG_swap };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_buffer,     MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
@@ -609,7 +677,7 @@ STATIC mp_obj_t rp2pio_statemachine_readinto(size_t n_args, const mp_obj_t *pos_
     mp_get_buffer_raise(args[ARG_buffer].u_obj, &bufinfo, MP_BUFFER_WRITE);
     int stride_in_bytes = mp_binary_get_size('@', bufinfo.typecode, NULL);
     if (stride_in_bytes > 4) {
-        mp_raise_ValueError(translate("Buffer elements must be 4 bytes long or less"));
+        mp_raise_ValueError(MP_ERROR_TEXT("Buffer elements must be 4 bytes long or less"));
     }
     int32_t start = args[ARG_start].u_int;
     size_t length = bufinfo.len / stride_in_bytes;
@@ -662,7 +730,7 @@ MP_DEFINE_CONST_FUN_OBJ_KW(rp2pio_statemachine_readinto_obj, 2, rp2pio_statemach
 //|         """
 //|         ...
 
-STATIC mp_obj_t rp2pio_statemachine_write_readinto(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+static mp_obj_t rp2pio_statemachine_write_readinto(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     enum { ARG_buffer_out, ARG_buffer_in, ARG_out_start, ARG_out_end, ARG_in_start, ARG_in_end, ARG_swap_out, ARG_swap_in };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_buffer_out,    MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
@@ -683,7 +751,7 @@ STATIC mp_obj_t rp2pio_statemachine_write_readinto(size_t n_args, const mp_obj_t
     mp_get_buffer_raise(args[ARG_buffer_out].u_obj, &buf_out_info, MP_BUFFER_READ);
     int out_stride_in_bytes = mp_binary_get_size('@', buf_out_info.typecode, NULL);
     if (out_stride_in_bytes > 4) {
-        mp_raise_ValueError(translate("Out-buffer elements must be <= 4 bytes long"));
+        mp_raise_ValueError(MP_ERROR_TEXT("Out-buffer elements must be <= 4 bytes long"));
     }
     int32_t out_start = args[ARG_out_start].u_int;
     size_t out_length = buf_out_info.len / out_stride_in_bytes;
@@ -693,7 +761,7 @@ STATIC mp_obj_t rp2pio_statemachine_write_readinto(size_t n_args, const mp_obj_t
     mp_get_buffer_raise(args[ARG_buffer_in].u_obj, &buf_in_info, MP_BUFFER_WRITE);
     int in_stride_in_bytes = mp_binary_get_size('@', buf_in_info.typecode, NULL);
     if (in_stride_in_bytes > 4) {
-        mp_raise_ValueError(translate("In-buffer elements must be <= 4 bytes long"));
+        mp_raise_ValueError(MP_ERROR_TEXT("In-buffer elements must be <= 4 bytes long"));
     }
     int32_t in_start = args[ARG_in_start].u_int;
     size_t in_length = buf_in_info.len / in_stride_in_bytes;
@@ -726,7 +794,7 @@ MP_DEFINE_CONST_FUN_OBJ_KW(rp2pio_statemachine_write_readinto_obj, 2, rp2pio_sta
 //|     def clear_rxfifo(self) -> None:
 //|         """Clears any unread bytes in the rxfifo."""
 //|         ...
-STATIC mp_obj_t rp2pio_statemachine_obj_clear_rxfifo(mp_obj_t self_in) {
+static mp_obj_t rp2pio_statemachine_obj_clear_rxfifo(mp_obj_t self_in) {
     rp2pio_statemachine_obj_t *self = MP_OBJ_TO_PTR(self_in);
     common_hal_rp2pio_statemachine_clear_rxfifo(self);
     return mp_const_none;
@@ -736,7 +804,7 @@ MP_DEFINE_CONST_FUN_OBJ_1(rp2pio_statemachine_clear_rxfifo_obj, rp2pio_statemach
 //|     def clear_txstall(self) -> None:
 //|         """Clears the txstall flag."""
 //|         ...
-STATIC mp_obj_t rp2pio_statemachine_obj_clear_txstall(mp_obj_t self_in) {
+static mp_obj_t rp2pio_statemachine_obj_clear_txstall(mp_obj_t self_in) {
     rp2pio_statemachine_obj_t *self = MP_OBJ_TO_PTR(self_in);
     common_hal_rp2pio_statemachine_clear_txstall(self);
     return mp_const_none;
@@ -748,14 +816,14 @@ MP_DEFINE_CONST_FUN_OBJ_1(rp2pio_statemachine_clear_txstall_obj, rp2pio_statemac
 //|     """The actual state machine frequency. This may not match the frequency requested
 //|     due to internal limitations."""
 
-STATIC mp_obj_t rp2pio_statemachine_obj_get_frequency(mp_obj_t self_in) {
+static mp_obj_t rp2pio_statemachine_obj_get_frequency(mp_obj_t self_in) {
     rp2pio_statemachine_obj_t *self = MP_OBJ_TO_PTR(self_in);
     check_for_deinit(self);
     return MP_OBJ_NEW_SMALL_INT(common_hal_rp2pio_statemachine_get_frequency(self));
 }
 MP_DEFINE_CONST_FUN_OBJ_1(rp2pio_statemachine_get_frequency_obj, rp2pio_statemachine_obj_get_frequency);
 
-STATIC mp_obj_t rp2pio_statemachine_obj_set_frequency(mp_obj_t self_in, mp_obj_t frequency) {
+static mp_obj_t rp2pio_statemachine_obj_set_frequency(mp_obj_t self_in, mp_obj_t frequency) {
     rp2pio_statemachine_obj_t *self = MP_OBJ_TO_PTR(self_in);
     check_for_deinit(self);
 
@@ -772,7 +840,7 @@ MP_PROPERTY_GETSET(rp2pio_statemachine_frequency_obj,
 //|     """True when the state machine has stalled due to a full TX FIFO since the last
 //|        `clear_txstall` call."""
 
-STATIC mp_obj_t rp2pio_statemachine_obj_get_txstall(mp_obj_t self_in) {
+static mp_obj_t rp2pio_statemachine_obj_get_txstall(mp_obj_t self_in) {
     rp2pio_statemachine_obj_t *self = MP_OBJ_TO_PTR(self_in);
     check_for_deinit(self);
     return MP_OBJ_NEW_SMALL_INT(common_hal_rp2pio_statemachine_get_txstall(self));
@@ -791,7 +859,7 @@ const mp_obj_property_t rp2pio_statemachine_txstall_obj = {
 //|     """True when the state machine has stalled due to a full RX FIFO since the last
 //|        `clear_rxfifo` call."""
 
-STATIC mp_obj_t rp2pio_statemachine_obj_get_rxstall(mp_obj_t self_in) {
+static mp_obj_t rp2pio_statemachine_obj_get_rxstall(mp_obj_t self_in) {
     rp2pio_statemachine_obj_t *self = MP_OBJ_TO_PTR(self_in);
     check_for_deinit(self);
     return MP_OBJ_NEW_SMALL_INT(common_hal_rp2pio_statemachine_get_rxstall(self));
@@ -805,7 +873,7 @@ MP_PROPERTY_GETTER(rp2pio_statemachine_rxstall_obj,
 //|     """The number of words available to readinto"""
 //|
 
-STATIC mp_obj_t rp2pio_statemachine_obj_get_in_waiting(mp_obj_t self_in) {
+static mp_obj_t rp2pio_statemachine_obj_get_in_waiting(mp_obj_t self_in) {
     rp2pio_statemachine_obj_t *self = MP_OBJ_TO_PTR(self_in);
     check_for_deinit(self);
     return MP_OBJ_NEW_SMALL_INT(common_hal_rp2pio_statemachine_get_in_waiting(self));
@@ -815,7 +883,62 @@ MP_DEFINE_CONST_FUN_OBJ_1(rp2pio_statemachine_get_in_waiting_obj, rp2pio_statema
 MP_PROPERTY_GETTER(rp2pio_statemachine_in_waiting_obj,
     (mp_obj_t)&rp2pio_statemachine_get_in_waiting_obj);
 
-STATIC const mp_rom_map_elem_t rp2pio_statemachine_locals_dict_table[] = {
+//|     offset: int
+//|     """The instruction offset where the program was actually loaded"""
+//|
+
+static mp_obj_t rp2pio_statemachine_obj_get_offset(mp_obj_t self_in) {
+    rp2pio_statemachine_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    check_for_deinit(self);
+    return MP_OBJ_NEW_SMALL_INT(common_hal_rp2pio_statemachine_get_offset(self));
+}
+MP_DEFINE_CONST_FUN_OBJ_1(rp2pio_statemachine_get_offset_obj, rp2pio_statemachine_obj_get_offset);
+
+MP_PROPERTY_GETTER(rp2pio_statemachine_offset_obj,
+    (mp_obj_t)&rp2pio_statemachine_get_offset_obj);
+
+//|     pc: int
+//|     """The current program counter of the state machine"""
+//|
+
+static mp_obj_t rp2pio_statemachine_obj_get_pc(mp_obj_t self_in) {
+    rp2pio_statemachine_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    check_for_deinit(self);
+    return MP_OBJ_NEW_SMALL_INT(common_hal_rp2pio_statemachine_get_pc(self));
+}
+MP_DEFINE_CONST_FUN_OBJ_1(rp2pio_statemachine_get_pc_obj, rp2pio_statemachine_obj_get_pc);
+
+MP_PROPERTY_GETTER(rp2pio_statemachine_pc_obj,
+    (mp_obj_t)&rp2pio_statemachine_get_pc_obj);
+
+//|     rxfifo: memorymap.AddressRange
+//|     """Access the state machine's rxfifo directly
+//|
+//|     If the state machine's fifo mode is ``txput`` then accessing this object
+//|     reads values stored by the ``mov rxfifo[], isr`` PIO instruction, and the
+//|     result of modifying it is undefined.
+//|
+//|     If the state machine's fifo mode is ``txget`` then modifying this object
+//|     writes values accessed by the ``mov osr, rxfifo[]`` PIO instruction, and
+//|     the result of accessing it is undefined.
+//|
+//|     If this state machine's mode is something else, then the property's value is `None`.
+//|
+//|     Note: Since the ``txput`` and ``txget`` fifo mode does not exist on RP2040, this property will always be `None`."""
+//|
+
+static mp_obj_t rp2pio_statemachine_obj_get_rxfifo(mp_obj_t self_in) {
+    rp2pio_statemachine_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    check_for_deinit(self);
+    return common_hal_rp2pio_statemachine_get_rxfifo(self);
+}
+MP_DEFINE_CONST_FUN_OBJ_1(rp2pio_statemachine_get_rxfifo_obj, rp2pio_statemachine_obj_get_rxfifo);
+
+MP_PROPERTY_GETTER(rp2pio_statemachine_rxfifo_obj,
+    (mp_obj_t)&rp2pio_statemachine_get_rxfifo_obj);
+
+
+static const mp_rom_map_elem_t rp2pio_statemachine_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&rp2pio_statemachine_deinit_obj) },
     { MP_ROM_QSTR(MP_QSTR___enter__), MP_ROM_PTR(&default___enter___obj) },
     { MP_ROM_QSTR(MP_QSTR___exit__), MP_ROM_PTR(&rp2pio_statemachine_obj___exit___obj) },
@@ -838,12 +961,18 @@ STATIC const mp_rom_map_elem_t rp2pio_statemachine_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_rxstall), MP_ROM_PTR(&rp2pio_statemachine_rxstall_obj) },
     { MP_ROM_QSTR(MP_QSTR_txstall), MP_ROM_PTR(&rp2pio_statemachine_txstall_obj) },
     { MP_ROM_QSTR(MP_QSTR_in_waiting), MP_ROM_PTR(&rp2pio_statemachine_in_waiting_obj) },
-};
-STATIC MP_DEFINE_CONST_DICT(rp2pio_statemachine_locals_dict, rp2pio_statemachine_locals_dict_table);
 
-const mp_obj_type_t rp2pio_statemachine_type = {
-    { &mp_type_type },
-    .name = MP_QSTR_StateMachine,
-    .make_new = rp2pio_statemachine_make_new,
-    .locals_dict = (mp_obj_dict_t *)&rp2pio_statemachine_locals_dict,
+    { MP_ROM_QSTR(MP_QSTR_offset), MP_ROM_PTR(&rp2pio_statemachine_offset_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pc), MP_ROM_PTR(&rp2pio_statemachine_pc_obj) },
+
+    { MP_ROM_QSTR(MP_QSTR_rxfifo), MP_ROM_PTR(&rp2pio_statemachine_rxfifo_obj) },
 };
+static MP_DEFINE_CONST_DICT(rp2pio_statemachine_locals_dict, rp2pio_statemachine_locals_dict_table);
+
+MP_DEFINE_CONST_OBJ_TYPE(
+    rp2pio_statemachine_type,
+    MP_QSTR_StateMachine,
+    MP_TYPE_FLAG_HAS_SPECIAL_ACCESSORS,
+    make_new, rp2pio_statemachine_make_new,
+    locals_dict, &rp2pio_statemachine_locals_dict
+    );
