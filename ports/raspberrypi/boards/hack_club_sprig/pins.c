@@ -1,6 +1,15 @@
+// This file is part of the CircuitPython project: https://circuitpython.org
+//
+// SPDX-FileCopyrightText: Copyright (c) 2023 ajs256
+//
+// SPDX-License-Identifier: MIT
+
 #include "shared-bindings/board/__init__.h"
 
-STATIC const mp_rom_map_elem_t board_module_globals_table[] = {
+#include "supervisor/board.h"
+#include "shared-module/displayio/__init__.h"
+
+static const mp_rom_map_elem_t board_module_globals_table[] = {
     CIRCUITPYTHON_BOARD_DICT_STANDARD_ITEMS
 
     { MP_ROM_QSTR(MP_QSTR_GP0), MP_ROM_PTR(&pin_GPIO0) },
@@ -80,6 +89,8 @@ STATIC const mp_rom_map_elem_t board_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_TFT_RESET), MP_ROM_PTR(&pin_GPIO23) },
 
     { MP_ROM_QSTR(MP_QSTR_WHITE_LED), MP_ROM_PTR(&pin_GPIO28) },
+
+    { MP_ROM_QSTR(MP_QSTR_DISPLAY), MP_ROM_PTR(&displays[0].display)},
 
 };
 MP_DEFINE_CONST_DICT(board_module_globals, board_module_globals_table);

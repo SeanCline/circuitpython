@@ -1,38 +1,17 @@
-/*
- * This file is part of the MicroPython project, http://micropython.org/
- *
- * The MIT License (MIT)
- *
- * Copyright (c) 2020 Scott Shawcroft for Adafruit Industries LLC
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// This file is part of the CircuitPython project: https://circuitpython.org
+//
+// SPDX-FileCopyrightText: Copyright (c) 2020 Scott Shawcroft for Adafruit Industries LLC
+//
+// SPDX-License-Identifier: MIT
 
 #include "shared-bindings/busio/I2C.h"
 #include "py/mperrno.h"
 #include "py/runtime.h"
 
-#include "components/driver/include/driver/i2c.h"
+#include "components/driver/i2c/include/driver/i2c.h"
 
 #include "shared-bindings/microcontroller/__init__.h"
 #include "shared-bindings/microcontroller/Pin.h"
-#include "supervisor/shared/translate/translate.h"
 
 void common_hal_busio_i2c_construct(busio_i2c_obj_t *self,
     const mcu_pin_obj_t *scl, const mcu_pin_obj_t *sda, uint32_t frequency, uint32_t timeout) {
@@ -41,9 +20,15 @@ void common_hal_busio_i2c_construct(busio_i2c_obj_t *self,
     // support I2C on these pins.
     //
     // 46 is also input-only so it'll never work.
+    #if CIRCUITPY_I2C_ALLOW_STRAPPING_PINS
+    if (scl->number == 46 || sda->number == 46) {
+        raise_ValueError_invalid_pins();
+    }
+    #else
     if (scl->number == 45 || scl->number == 46 || sda->number == 45 || sda->number == 46) {
         raise_ValueError_invalid_pins();
     }
+    #endif
 
     #if CIRCUITPY_REQUIRE_I2C_PULLUPS
     // Test that the pins are in a high state. (Hopefully indicating they are pulled up.)
@@ -71,24 +56,22 @@ void common_hal_busio_i2c_construct(busio_i2c_obj_t *self,
     if (gpio_get_level(sda->number) == 0 || gpio_get_level(scl->number) == 0) {
         reset_pin_number(sda->number);
         reset_pin_number(scl->number);
-        mp_raise_RuntimeError(translate("No pull up found on SDA or SCL; check your wiring"));
+        mp_raise_RuntimeError(MP_ERROR_TEXT("No pull up found on SDA or SCL; check your wiring"));
     }
     #endif
 
     self->xSemaphore = xSemaphoreCreateMutex();
     if (self->xSemaphore == NULL) {
-        mp_raise_RuntimeError(translate("Unable to create lock"));
+        mp_raise_RuntimeError(MP_ERROR_TEXT("Unable to create lock"));
     }
     self->sda_pin = sda;
     self->scl_pin = scl;
     self->i2c_num = peripherals_i2c_get_free_num();
+    self->has_lock = 0;
 
     if (self->i2c_num == I2C_NUM_MAX) {
-        mp_raise_ValueError(translate("All I2C peripherals are in use"));
+        mp_raise_ValueError(MP_ERROR_TEXT("All I2C peripherals are in use"));
     }
-
-    // Delete any previous driver.
-    i2c_driver_delete(self->i2c_num);
 
     const i2c_config_t i2c_conf = {
         .mode = I2C_MODE_MASTER,
@@ -113,7 +96,7 @@ void common_hal_busio_i2c_construct(busio_i2c_obj_t *self,
         if (err == ESP_FAIL) {
             mp_raise_OSError(MP_EIO);
         } else {
-            mp_raise_RuntimeError(translate("init I2C"));
+            mp_raise_RuntimeError(MP_ERROR_TEXT("init I2C"));
         }
     }
 
@@ -150,11 +133,14 @@ static esp_err_t i2c_zero_length_write(busio_i2c_obj_t *self, uint8_t addr, Tick
 }
 
 bool common_hal_busio_i2c_probe(busio_i2c_obj_t *self, uint8_t addr) {
-    esp_err_t result = i2c_zero_length_write(self, addr, 1);
+    esp_err_t result = i2c_zero_length_write(self, addr, pdMS_TO_TICKS(10));
     return result == ESP_OK;
 }
 
 bool common_hal_busio_i2c_try_lock(busio_i2c_obj_t *self) {
+    if (common_hal_busio_i2c_deinited(self)) {
+        return false;
+    }
     if (self->has_lock) {
         return false;
     }
@@ -186,21 +172,21 @@ static uint8_t convert_esp_err(esp_err_t result) {
 
 uint8_t common_hal_busio_i2c_write(busio_i2c_obj_t *self, uint16_t addr, const uint8_t *data, size_t len) {
     return convert_esp_err(len == 0
-        ? i2c_zero_length_write(self, addr, 100)
-        : i2c_master_write_to_device(self->i2c_num, (uint8_t)addr, data, len, 100 /* wait in ticks */)
+        ? i2c_zero_length_write(self, addr, pdMS_TO_TICKS(1000))
+        : i2c_master_write_to_device(self->i2c_num, (uint8_t)addr, data, len, pdMS_TO_TICKS(1000))
         );
 }
 
 uint8_t common_hal_busio_i2c_read(busio_i2c_obj_t *self, uint16_t addr, uint8_t *data, size_t len) {
     return convert_esp_err(
-        i2c_master_read_from_device(self->i2c_num, (uint8_t)addr, data, len, 100 /* wait in ticks */));
+        i2c_master_read_from_device(self->i2c_num, (uint8_t)addr, data, len, pdMS_TO_TICKS(1000)));
 }
 
 uint8_t common_hal_busio_i2c_write_read(busio_i2c_obj_t *self, uint16_t addr,
     uint8_t *out_data, size_t out_len, uint8_t *in_data, size_t in_len) {
     return convert_esp_err(
         i2c_master_write_read_device(self->i2c_num, (uint8_t)addr,
-            out_data, out_len, in_data, in_len, 100 /* wait in ticks */));
+            out_data, out_len, in_data, in_len, pdMS_TO_TICKS(1000)));
 }
 
 void common_hal_busio_i2c_never_reset(busio_i2c_obj_t *self) {

@@ -1,35 +1,14 @@
-/*
- * This file is part of the MicroPython project, http://micropython.org/
- *
- * The MIT License (MIT)
- *
- * Copyright (c) 2019 Lucian Copeland for Adafruit Industries
- * Uses code from Micropython, Copyright (c) 2013-2016 Damien P. George
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// This file is part of the CircuitPython project: https://circuitpython.org
+//
+// SPDX-FileCopyrightText: Copyright (c) 2019 Lucian Copeland for Adafruit Industries
+// SPDX-FileCopyrightText: Uses code from Micropython, Copyright (c) 2013-2016 Damien P. George
+//
+// SPDX-License-Identifier: MIT
 
 #include <stdint.h>
 #include "py/runtime.h"
 #include "common-hal/pwmio/PWMOut.h"
 #include "shared-bindings/pwmio/PWMOut.h"
-#include "supervisor/shared/translate/translate.h"
 
 #include STM32_HAL_H
 #include "shared-bindings/microcontroller/Pin.h"
@@ -37,17 +16,16 @@
 #include "timers.h"
 
 // Bitmask of channels taken.
-STATIC uint8_t tim_channels_taken[TIM_BANK_ARRAY_LEN];
+static uint8_t tim_channels_taken[TIM_BANK_ARRAY_LEN];
 // Initial frequency timer is set to.
-STATIC uint32_t tim_frequencies[TIM_BANK_ARRAY_LEN];
-STATIC bool never_reset_tim[TIM_BANK_ARRAY_LEN];
+static uint32_t tim_frequencies[TIM_BANK_ARRAY_LEN];
 
-STATIC uint32_t timer_get_internal_duty(uint16_t duty, uint32_t period) {
+static uint32_t timer_get_internal_duty(uint16_t duty, uint32_t period) {
     // duty cycle is duty/0xFFFF fraction x (number of pulses per period)
     return (duty * period) / 0xffff;
 }
 
-STATIC bool timer_get_optimal_divisors(uint32_t *period, uint32_t *prescaler,
+static bool timer_get_optimal_divisors(uint32_t *period, uint32_t *prescaler,
     uint32_t frequency, uint32_t source_freq) {
     // Find the largest possible period supported by this frequency
     *prescaler = 0;
@@ -60,15 +38,6 @@ STATIC bool timer_get_optimal_divisors(uint32_t *period, uint32_t *prescaler,
     }
     // Return success or failure.
     return *prescaler != 0;
-}
-
-void pwmout_reset(void) {
-    for (int i = 0; i < TIM_BANK_ARRAY_LEN; i++) {
-        if (!never_reset_tim[i]) {
-            tim_channels_taken[i] = 0x00;
-            tim_frequencies[i] = 0;
-        }
-    }
 }
 
 pwmout_result_t common_hal_pwmio_pwmout_construct(pwmio_pwmout_obj_t *self,
@@ -95,12 +64,12 @@ pwmout_result_t common_hal_pwmio_pwmout_construct(pwmio_pwmout_obj_t *self,
             if (tim_index < TIM_BANK_ARRAY_LEN && tim_channels_taken[tim_index] != 0) {
                 // Timer has already been reserved by an internal module
                 if (stm_peripherals_timer_is_reserved(mcu_tim_banks[tim_index])) {
-                    last_failure = PWMOUT_ALL_TIMERS_ON_PIN_IN_USE;
+                    last_failure = PWMOUT_INTERNAL_RESOURCES_IN_USE;
                     continue; // keep looking
                 }
                 // is it the same channel? (or all channels reserved by a var-freq)
                 if (tim_channels_taken[tim_index] & (1 << tim_channel_index)) {
-                    last_failure = PWMOUT_ALL_TIMERS_ON_PIN_IN_USE;
+                    last_failure = PWMOUT_INTERNAL_RESOURCES_IN_USE;
                     continue; // keep looking, might be another viable option
                 }
                 // If the frequencies are the same it's ok
@@ -199,22 +168,7 @@ pwmout_result_t common_hal_pwmio_pwmout_construct(pwmio_pwmout_obj_t *self,
 }
 
 void common_hal_pwmio_pwmout_never_reset(pwmio_pwmout_obj_t *self) {
-    for (size_t i = 0; i < TIM_BANK_ARRAY_LEN; i++) {
-        if (mcu_tim_banks[i] == self->handle.Instance) {
-            never_reset_tim[i] = true;
-            common_hal_never_reset_pin(self->pin);
-            break;
-        }
-    }
-}
-
-void common_hal_pwmio_pwmout_reset_ok(pwmio_pwmout_obj_t *self) {
-    for (size_t i = 0; i < TIM_BANK_ARRAY_LEN; i++) {
-        if (mcu_tim_banks[i] == self->handle.Instance) {
-            never_reset_tim[i] = false;
-            break;
-        }
-    }
+    common_hal_never_reset_pin(self->pin);
 }
 
 bool common_hal_pwmio_pwmout_deinited(pwmio_pwmout_obj_t *self) {
@@ -237,6 +191,7 @@ void common_hal_pwmio_pwmout_deinit(pwmio_pwmout_obj_t *self) {
     // if reserved timer has no active channels, we can disable it
     if (tim_channels_taken[self->tim->tim_index] == 0) {
         tim_frequencies[self->tim->tim_index] = 0x00;
+        HAL_TIM_PWM_DeInit(&self->handle);
         stm_peripherals_timer_free(self->handle.Instance);
     }
 
@@ -273,16 +228,16 @@ void common_hal_pwmio_pwmout_set_frequency(pwmio_pwmout_obj_t *self, uint32_t fr
 
     // restart everything, adjusting for new speed
     if (HAL_TIM_PWM_Init(&self->handle) != HAL_OK) {
-        mp_raise_RuntimeError(translate("timer re-init"));
+        mp_raise_RuntimeError(MP_ERROR_TEXT("timer re-init"));
     }
 
     self->chan_handle.Pulse = timer_get_internal_duty(self->duty_cycle, period);
 
     if (HAL_TIM_PWM_ConfigChannel(&self->handle, &self->chan_handle, self->channel) != HAL_OK) {
-        mp_raise_RuntimeError(translate("channel re-init"));
+        mp_raise_RuntimeError(MP_ERROR_TEXT("channel re-init"));
     }
     if (HAL_TIM_PWM_Start(&self->handle, self->channel) != HAL_OK) {
-        mp_raise_RuntimeError(translate("PWM restart"));
+        mp_raise_RuntimeError(MP_ERROR_TEXT("PWM restart"));
     }
 
     tim_frequencies[self->tim->tim_index] = frequency;

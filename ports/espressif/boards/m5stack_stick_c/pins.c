@@ -1,9 +1,15 @@
+// This file is part of the CircuitPython project: https://circuitpython.org
+//
+// SPDX-FileCopyrightText: Copyright (c) 2023 CDarius
+//
+// SPDX-License-Identifier: MIT
+
 #include "shared-bindings/board/__init__.h"
 #include "shared-module/displayio/__init__.h"
 
 CIRCUITPY_BOARD_BUS_SINGLETON(porta_i2c, i2c, 1)
 
-STATIC const mp_rom_map_elem_t board_module_globals_table[] = {
+static const mp_rom_map_elem_t board_module_globals_table[] = {
     CIRCUITPYTHON_BOARD_DICT_STANDARD_ITEMS
 
     // External pins are in silkscreen order, from top to bottom, left side, then right side
@@ -36,6 +42,9 @@ STATIC const mp_rom_map_elem_t board_module_globals_table[] = {
 
     // internal devices interrupt
     { MP_ROM_QSTR(MP_QSTR_SYS_INT), MP_ROM_PTR(&pin_GPIO35) },
+
+    // pmu AXP192
+    { MP_ROM_QSTR(MP_QSTR_PMU_N_VBUSEN), MP_ROM_PTR(&pin_GPIO27) },
 
     // pdm microphone
     { MP_ROM_QSTR(MP_QSTR_PDM_MIC_CLK), MP_ROM_PTR(&pin_GPIO0) },
